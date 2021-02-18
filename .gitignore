@@ -1,0 +1,4 @@
+*.exe
+/tgscli*
+/debug*
+/dist/
