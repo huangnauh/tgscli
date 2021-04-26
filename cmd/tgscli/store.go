@@ -22,6 +22,7 @@ import (
 func init() {
 	rootCmd.AddCommand(putCmd)
 	rootCmd.AddCommand(getCmd)
+	rootCmd.AddCommand(shareCmd)
 	rootCmd.AddCommand(listCmd)
 }
 
@@ -69,6 +70,30 @@ func prerun(cmd *cobra.Command, args []string, remoteMetadata bool) {
 	if err != nil {
 		errorExitf("Get Telegram Chat: %v", err)
 	}
+}
+
+func GetUrlByName(filename string) (string, error) {
+	var v []byte
+	db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(strconv.FormatInt(cfg.ChatID, 10)))
+		if b == nil {
+			return nil
+		}
+		v = b.Get([]byte(filename))
+		return nil
+	})
+	if v == nil {
+		return "", os.ErrNotExist
+	}
+	file := NewFile(v)
+	uri, err := bot.FileURLByID(file.FileID)
+	if err != nil {
+		if strings.Contains(err.Error(), "Not Found") {
+			return "", os.ErrNotExist
+		}
+		return "", fmt.Errorf("Get File Uri %s: %v\n", file.FileID, err)
+	}
+	return uri, err
 }
 
 func SaveFileByName(filename, output string) {
@@ -216,6 +241,23 @@ var getCmd = &cobra.Command{
 			outputFile = args[1]
 		}
 		SaveFileByName(args[0], outputFile)
+	},
+}
+
+var shareCmd = &cobra.Command{
+	Use:   "share [filename]",
+	Short: "generate url for download access",
+	Args:  cobra.ExactArgs(1),
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		prerun(cmd, args, true)
+	},
+	PersistentPostRun: postrun,
+	Run: func(cmd *cobra.Command, args []string) {
+		uri, err := GetUrlByName(args[0])
+		if err != nil {
+			errorExitf("Get url: %v\n", err)
+		}
+		fmt.Fprintf(outWriter, "Share :%s\n", uri)
 	},
 }
 
