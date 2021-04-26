@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	bolt "go.etcd.io/bbolt"
 	"gopkg.in/tucnak/telebot.v2"
@@ -153,8 +154,13 @@ func UploadFileByName(filename string) *telebot.Message {
 	return m
 }
 
-func NewFile(v []byte) *telebot.File {
-	file := &telebot.File{}
+type File struct {
+	telebot.File
+	Time time.Time `json:"time"`
+}
+
+func NewFile(v []byte) *File {
+	file := &File{}
 	err := json.Unmarshal(v, file)
 	if err != nil {
 		errorExitf("File Info %s: %v\n", v, err)
@@ -162,9 +168,12 @@ func NewFile(v []byte) *telebot.File {
 	return file
 }
 
-func format(k, v []byte) {
+func format(table *tablewriter.Table, k, v []byte) {
 	file := NewFile(v)
-	fmt.Printf("name=%s, id=%s, size=%d\n", k, file.FileID, file.FileSize)
+	table.Append([]string{
+		file.Time.Format(time.RFC1123),
+		fmt.Sprintf("%d", file.FileSize),
+		string(k)})
 }
 
 var saveCmd = &cobra.Command{
@@ -226,16 +235,26 @@ var listCmd = &cobra.Command{
 				return nil
 			}
 			c := b.Cursor()
+
+			table := tablewriter.NewWriter(outWriter)
+			table.SetBorder(false)
+			table.SetCenterSeparator("")
+			table.SetColumnSeparator("")
+			table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+			table.SetAlignment(tablewriter.ALIGN_LEFT)
+			table.SetHeader([]string{"LastWriteTime", "Length", "Name"})
+
 			if len(args) > 0 {
 				prefix := []byte(args[0])
 				for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-					format(k, v)
+					format(table, k, v)
 				}
 			} else {
 				for k, v := c.First(); k != nil; k, v = c.Next() {
-					format(k, v)
+					format(table, k, v)
 				}
 			}
+			table.Render()
 			return nil
 		})
 	},
@@ -254,7 +273,10 @@ var putCmd = &cobra.Command{
 		startTime := time.Now()
 		m := UploadFileByName(args[0])
 		fmt.Fprintf(outWriter, "Upload time:%s\n", time.Since(startTime))
-		body, _ := json.Marshal(m.Document.File)
+		body, _ := json.Marshal(File{
+			m.Document.File,
+			time.Now(),
+		})
 
 		err = db.Update(func(tx *bolt.Tx) error {
 			b, err := tx.CreateBucketIfNotExists([]byte(strconv.FormatInt(cfg.ChatID, 10)))
