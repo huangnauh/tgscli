@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cheggaaa/pb/v3"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	bolt "go.etcd.io/bbolt"
@@ -47,7 +48,7 @@ func prerun(cmd *cobra.Command, args []string, remoteMetadata bool) {
 	_, err = os.Stat(dbPath)
 	if err != nil && os.IsNotExist(err) {
 		if remoteMetadata && cfg.DatabaseID != "" {
-			SaveFileByID(cfg.DatabaseID, dbPath)
+			SaveFileByID(cfg.DatabaseID, dbPath, 0)
 		}
 	} else if err != nil {
 		errorExitf("Open Database: %s\n", err)
@@ -111,7 +112,7 @@ func SaveFileByName(filename, output string) {
 		return
 	}
 	file := NewFile(v)
-	err := SaveFileByID(file.FileID, output)
+	err := SaveFileByID(file.FileID, output, int64(file.FileSize))
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Fprintf(outWriter, "Not Found\n")
@@ -122,7 +123,7 @@ func SaveFileByName(filename, output string) {
 	fmt.Fprintf(outWriter, "Download File to %s\n", output)
 }
 
-func SaveFileByID(fileID, output string) error {
+func SaveFileByID(fileID, output string, size int64) error {
 	uri, err := bot.FileURLByID(fileID)
 	if err != nil {
 		if strings.Contains(err.Error(), "Not Found") {
@@ -148,13 +149,23 @@ func SaveFileByID(fileID, output string) error {
 	if res.StatusCode >= http.StatusBadRequest {
 		return fmt.Errorf("Get File Response %s: %d\n", fileID, res.StatusCode)
 	}
-
 	rawFile, err := os.OpenFile(output, os.O_TRUNC|os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return fmt.Errorf("Download File %s: %s\n", fileID, err)
 	}
 	defer rawFile.Close()
-	_, err = io.Copy(rawFile, res.Body)
+
+	var src io.Reader
+	if size > 0 {
+		bar := pb.Full.Start64(size)
+		barReader := bar.NewProxyReader(res.Body)
+		defer bar.Finish()
+		src = barReader
+	} else {
+		src = res.Body
+	}
+
+	_, err = io.Copy(rawFile, src)
 	if err != nil {
 		return fmt.Errorf("Download File %s: %s\n", fileID, err)
 	}
@@ -164,13 +175,21 @@ func SaveFileByID(fileID, output string) error {
 func UploadFileByName(filename string) *telebot.Message {
 	file, err := os.OpenFile(filename, os.O_RDONLY, 0644)
 	if err != nil {
-		errorExitf("Upload File: %v\n", err)
+		errorExitf("Open File: %v\n", err)
 	}
+	info, err := file.Stat()
+	if err != nil {
+		errorExitf("Stat File: %v\n", err)
+	}
+
+	bar := pb.Full.Start64(info.Size())
+	barReader := bar.NewProxyReader(file)
+	defer bar.Finish()
 
 	defer file.Close()
 	name := filepath.Base(filename)
 	m, err := bot.Send(chat, &telebot.Document{
-		File:     telebot.FromReader(file),
+		File:     telebot.FromReader(barReader),
 		FileName: name,
 	})
 	if err != nil {
@@ -284,7 +303,7 @@ var listCmd = &cobra.Command{
 			table.SetColumnSeparator("")
 			table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
 			table.SetAlignment(tablewriter.ALIGN_LEFT)
-			table.SetHeader([]string{"LastWriteTime", "Length", "Name"})
+			table.SetHeader([]string{"Last_Write_Time", "Length", "Name"})
 
 			if len(args) > 0 {
 				prefix := []byte(args[0])
