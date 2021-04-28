@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cheggaaa/pb/v3"
+	"github.com/dustin/go-humanize"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	bolt "go.etcd.io/bbolt"
@@ -25,6 +26,7 @@ func init() {
 	rootCmd.AddCommand(getCmd)
 	rootCmd.AddCommand(shareCmd)
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(saveCmd)
 }
 
 var (
@@ -212,14 +214,6 @@ func NewFile(v []byte) *File {
 	return file
 }
 
-func format(table *tablewriter.Table, k, v []byte) {
-	file := NewFile(v)
-	table.Append([]string{
-		file.Time.Format(time.RFC1123),
-		fmt.Sprintf("%d", file.FileSize),
-		string(k)})
-}
-
 var saveCmd = &cobra.Command{
 	Use:   "save",
 	Short: "upload metadata",
@@ -241,7 +235,10 @@ var saveCmd = &cobra.Command{
 		}
 		m := UploadFileByName(dbPath)
 		cfg.DatabaseID = m.Document.File.FileID
-		cfg.Write()
+		err = cfg.Write()
+		if err != nil {
+			errorExitf("Upload metadata: %v\n", err)
+		}
 		fmt.Fprintf(outWriter, "Upload metadata to :%s\n", cfg.DatabaseID)
 	},
 }
@@ -280,6 +277,26 @@ var shareCmd = &cobra.Command{
 	},
 }
 
+func formatTable(table *tablewriter.Table, k, v []byte) {
+	file := NewFile(v)
+	table.Append([]string{
+		file.Time.Format(time.RFC1123),
+		humanize.Bytes(uint64(file.FileSize)),
+		string(k),
+	})
+}
+
+func newTable() *tablewriter.Table {
+	table := tablewriter.NewWriter(outWriter)
+	table.SetBorder(false)
+	table.SetCenterSeparator("")
+	table.SetColumnSeparator("")
+	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	table.SetAlignment(tablewriter.ALIGN_LEFT)
+	table.SetHeader([]string{"Time", "Length", "Name"})
+	return table
+}
+
 var listCmd = &cobra.Command{
 	Use:   "list [prefix]",
 	Short: "list prefix file",
@@ -296,26 +313,23 @@ var listCmd = &cobra.Command{
 				return nil
 			}
 			c := b.Cursor()
-
-			table := tablewriter.NewWriter(outWriter)
-			table.SetBorder(false)
-			table.SetCenterSeparator("")
-			table.SetColumnSeparator("")
-			table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-			table.SetAlignment(tablewriter.ALIGN_LEFT)
-			table.SetHeader([]string{"Last_Write_Time", "Length", "Name"})
-
+			table := newTable()
+			found := false
 			if len(args) > 0 {
 				prefix := []byte(args[0])
 				for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-					format(table, k, v)
+					found = true
+					formatTable(table, k, v)
 				}
 			} else {
 				for k, v := c.First(); k != nil; k, v = c.Next() {
-					format(table, k, v)
+					found = true
+					formatTable(table, k, v)
 				}
 			}
-			table.Render()
+			if found {
+				table.Render()
+			}
 			return nil
 		})
 	},
