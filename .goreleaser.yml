@@ -3,7 +3,6 @@ before:
     - go mod download
 builds:
   - id: "tgscli"
-    ldflags: -X {{.Env.VERSION_IMPORT}}.GitCommit={{.Env.GIT_COMMIT}} -X {{.Env.VERSION_IMPORT}}.GitDescribe={{.Env.GIT_DESCRIBE}}
     env:
       - CGO_ENABLED=0
     main: ./cmd/tgscli
@@ -13,8 +12,6 @@ builds:
       - darwin
     goarch:
       - amd64
-      - arm64
-      - 386
     mod_timestamp: '{{ .CommitTimestamp }}'
     # dir:
     binary: tgscli

@@ -18,8 +18,8 @@ var (
 var rootCmd = &cobra.Command{
 	Use:               version.APP,
 	DisableAutoGenTag: true,
-	Version: fmt.Sprintf("%s (%s), runtime:%s/%s %s", version.GitDescribe,
-		version.GitCommit, runtime.GOOS, runtime.GOARCH, runtime.Version()),
+	Version: fmt.Sprintf("%s, runtime:%s/%s %s", version.GitDescribe,
+		runtime.GOOS, runtime.GOARCH, runtime.Version()),
 	Short: "Storage Command Line utility for telegram files management",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		outWriter = cmd.OutOrStdout()

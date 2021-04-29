@@ -5,6 +5,5 @@ const (
 )
 
 var (
-	GitCommit   = "dccd273"
-	GitDescribe = "0.0.0"
+	GitDescribe = "0.0.2"
 )
