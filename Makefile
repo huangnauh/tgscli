@@ -5,14 +5,21 @@ GIT_COMMIT=$(shell git rev-parse --short HEAD)
 GIT_DESCRIBE=$(shell git describe --tags --always)
 GOLDFLAGS=-X $(VERSION_IMPORT).GitCommit=$(GIT_COMMIT) -X $(VERSION_IMPORT).GitDescribe=$(GIT_DESCRIBE)
 
+default: tidy build
+
 build:
 	go build -gcflags=all="-N -l" -ldflags '$(GOLDFLAGS)' ./cmd/${APP}
 
-docs:
-	./tgscli docs
+tidy:
+	go mod tidy
 
-install:
+docs:
+	tgscli docs
+
+install-app:
 	go install -ldflags '$(GOLDFLAGS)' ./cmd/${APP}
+
+install: install-app docs
 
 release-skip:
 	VERSION_IMPORT=${VERSION_IMPORT} GIT_COMMIT=${GIT_COMMIT} GIT_DESCRIBE=${GIT_DESCRIBE} \
@@ -22,4 +29,4 @@ release:
 	VERSION_IMPORT=${VERSION_IMPORT} GIT_COMMIT=${GIT_COMMIT} GIT_DESCRIBE=${GIT_DESCRIBE} \
 		goreleaser --rm-dist
 
-.PHONY: build docs install release-build
+.PHONY: build tidy docs install release-build
