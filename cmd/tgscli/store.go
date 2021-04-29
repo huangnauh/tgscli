@@ -37,7 +37,7 @@ var (
 	forceFlag      bool
 	verboseFlag    bool
 	savePinnedFlag bool
-	messages       map[string]Message
+	messages       map[string]*Message
 )
 
 type Message struct {
@@ -97,7 +97,7 @@ func GetMeta(metaPath string, metaInfo os.FileInfo) {
 	metaFile.Close()
 }
 
-func prerun(cmd *cobra.Command, args []string) {
+func prerun(_ *cobra.Command, _ []string) {
 	var err error
 	cfg, err = ReadConfig()
 	if err != nil {
@@ -117,8 +117,11 @@ func prerun(cmd *cobra.Command, args []string) {
 	if err != nil {
 		errorExitf("Get Telegram Chat: %v", err)
 	}
+	prerunMessage()
+}
 
-	messages = make(map[string]Message)
+func prerunMessage() {
+	messages = make(map[string]*Message)
 	metaPath := GetMetaPath()
 	metaInfo, err := os.Stat(metaPath)
 	if err != nil && os.IsNotExist(err) {
@@ -154,8 +157,8 @@ func prerun(cmd *cobra.Command, args []string) {
 	}
 
 	getPinnedMessages()
-	if messageId, _ := chat.PinnedMessage.MessageSig(); messageId != cfg.MessageID {
-		cfg.Write()
+	if messageID, _ := chat.PinnedMessage.MessageSig(); messageID != cfg.MessageID {
+		_ = cfg.Write()
 	}
 	SaveMeta(metaPath)
 }
@@ -170,7 +173,7 @@ func getPinnedMessages() {
 	if savePinnedFlag {
 		SaveMeta(GetMetaPinnedPath())
 	}
-	pinnedMessages := make(map[string]Message)
+	pinnedMessages := make(map[string]*Message)
 	err = json.Unmarshal(buf.Bytes(), &pinnedMessages)
 	if err != nil {
 		errorExitf("pinned file: %s\n", err)
@@ -189,7 +192,7 @@ func getPinnedMessages() {
 	fmt.Fprintf(outWriter, "got %d files in total\n", len(messages))
 }
 
-func GetUrlByName(filename string) (string, error) {
+func GetURLByName(filename string) (string, error) {
 	msg, ok := messages[filename]
 	if !ok {
 		return "", os.ErrNotExist
@@ -199,9 +202,9 @@ func GetUrlByName(filename string) (string, error) {
 		if strings.Contains(err.Error(), "Not Found") {
 			return "", os.ErrNotExist
 		}
-		return "", fmt.Errorf("Get File Uri %s: %v\n", filename, err)
+		return "", fmt.Errorf("get file url %s: %s", filename, err)
 	}
-	return uri, err
+	return uri, nil
 }
 
 func SaveFileByName(filename, output string) error {
@@ -211,15 +214,11 @@ func SaveFileByName(filename, output string) error {
 	}
 	rawFile, err := os.OpenFile(output, os.O_TRUNC|os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		return fmt.Errorf("Download File %s: %s\n", filename, err)
+		return fmt.Errorf("download file %s: %s", filename, err)
 	}
 	defer rawFile.Close()
 
-	err = GetFileByID(msg.FileID, int64(msg.FileSize), rawFile)
-	if err != nil {
-		return err
-	}
-	return nil
+	return GetFileByID(msg.FileID, int64(msg.FileSize), rawFile)
 }
 
 func GetFileByID(fileID string, size int64, writer io.Writer) error {
@@ -228,7 +227,7 @@ func GetFileByID(fileID string, size int64, writer io.Writer) error {
 		if strings.Contains(err.Error(), "Not Found") {
 			return os.ErrNotExist
 		}
-		return fmt.Errorf("Get File Uri %s: %v\n", fileID, err)
+		return fmt.Errorf("get file uri %s: %s", fileID, err)
 	}
 
 	req, err := http.NewRequestWithContext(
@@ -238,15 +237,15 @@ func GetFileByID(fileID string, size int64, writer io.Writer) error {
 		nil,
 	)
 	if err != nil {
-		return fmt.Errorf("Get File Req %s: %v\n", fileID, err)
+		return fmt.Errorf("get file req %s: %v", fileID, err)
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("Get File %s: %v\n", fileID, err)
+		return fmt.Errorf("get file %s: %v", fileID, err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("Get File Response %s: %d\n", fileID, res.StatusCode)
+		return fmt.Errorf("get file response %s: %d", fileID, res.StatusCode)
 	}
 
 	var src io.Reader
@@ -261,7 +260,7 @@ func GetFileByID(fileID string, size int64, writer io.Writer) error {
 
 	_, err = io.Copy(writer, src)
 	if err != nil {
-		return fmt.Errorf("Download File %s: %s\n", fileID, err)
+		return fmt.Errorf("download file %s: %s", fileID, err)
 	}
 	return nil
 }
@@ -322,7 +321,7 @@ var shareCmd = &cobra.Command{
 	},
 	PersistentPostRun: postrun,
 	Run: func(cmd *cobra.Command, args []string) {
-		uri, err := GetUrlByName(args[0])
+		uri, err := GetURLByName(args[0])
 		if err != nil {
 			errorExitf("Get url: %v\n", err)
 		}
@@ -330,7 +329,7 @@ var shareCmd = &cobra.Command{
 	},
 }
 
-func formatTable(table *tablewriter.Table, name string, msg Message) {
+func formatTable(table *tablewriter.Table, name string, msg *Message) {
 	table.Append([]string{
 		msg.Time.Format(time.RFC1123),
 		humanize.Bytes(uint64(msg.FileSize)),
@@ -366,7 +365,7 @@ var listCmd = &cobra.Command{
 	},
 }
 
-func getName(filename string, messages ...map[string]Message) string {
+func getName(filename string, messages ...map[string]*Message) string {
 	name := filepath.Base(filename)
 	for count := 1; ; count++ {
 		found := false
@@ -384,7 +383,7 @@ func getName(filename string, messages ...map[string]Message) string {
 	}
 }
 
-func setName(messages map[string]Message, filename string, msg Message) error {
+func setName(messages map[string]*Message, filename string, msg *Message) error {
 	name := getName(filename, messages)
 	body, err := json.Marshal(messages)
 	if err != nil {
@@ -415,7 +414,7 @@ var putCmd = &cobra.Command{
 		m := UploadFileByName(args[0])
 		fmt.Fprintf(outWriter, "Upload time:%s\n", time.Since(startTime))
 		messageID, chatID := m.MessageSig()
-		msg := Message{
+		msg := &Message{
 			m.Document.File,
 			telebot.StoredMessage{
 				MessageID: messageID,
@@ -438,7 +437,7 @@ var putCmd = &cobra.Command{
 			FileName: "meta.json",
 		}
 		if cfg.MessageID == "" {
-			m, err := bot.Send(chat, doc)
+			m, err = bot.Send(chat, doc)
 			if err != nil {
 				errorExitf("Upload failed: %v\n", err)
 			}

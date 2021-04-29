@@ -1,9 +1,7 @@
 package main
 
 import (
-	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
@@ -16,10 +14,6 @@ var (
 func init() {
 	rootCmd.AddCommand(docsCmd)
 	docsCmd.Flags().StringVarP(&docDirFlag, "doc-path", "", "./docs", "Path directory where you want generate doc files")
-}
-
-func linkHandler(name string) string {
-	return fmt.Sprintf("./%s", strings.TrimSuffix(name, ".md"))
 }
 
 var docsCmd = &cobra.Command{

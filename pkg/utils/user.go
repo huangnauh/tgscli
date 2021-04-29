@@ -18,7 +18,7 @@ func GetDebugEnv() string {
 
 func GetBoolEnv(name string) bool {
 	e := GetStrEnv(name)
-	return e != "" && strings.ToLower(e) != "false"
+	return e != "" && strings.EqualFold(e, "false")
 }
 
 func GetScoopEnv() string {
@@ -29,16 +29,14 @@ func UserCacheDir() (string, error) {
 	cacheDir := GetStrEnv("cache")
 	if cacheDir == "" {
 		return os.UserCacheDir()
-	} else {
-		return cacheDir, nil
 	}
+	return cacheDir, nil
 }
 
 func UserConfigDir() (string, error) {
 	configDir := GetStrEnv("config")
 	if configDir == "" {
 		return os.UserConfigDir()
-	} else {
-		return configDir, nil
 	}
+	return configDir, nil
 }

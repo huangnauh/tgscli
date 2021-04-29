@@ -7,16 +7,12 @@ import (
 	"runtime"
 
 	"github.com/huangnauh/tgscli/pkg/version"
-	"github.com/mattn/go-colorable"
 	"github.com/spf13/cobra"
 )
 
 var (
 	outWriter io.Writer = os.Stdout
 	errWriter io.Writer = os.Stderr
-	inReader  io.Reader = os.Stdin
-
-	colorableOut io.Writer = colorable.NewColorableStdout()
 )
 
 var rootCmd = &cobra.Command{
@@ -28,11 +24,6 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		outWriter = cmd.OutOrStdout()
 		errWriter = cmd.ErrOrStderr()
-		inReader = cmd.InOrStdin()
-
-		if outWriter != os.Stdout {
-			colorableOut = outWriter
-		}
 	},
 }
 
@@ -46,11 +37,6 @@ You need to open pwsh.exe or cmd.exe and run it from there.
 
 func errorExitf(format string, a ...interface{}) {
 	fmt.Fprintf(errWriter, format+"\n", a...)
-	os.Exit(1)
-}
-
-func errorExit(err error) {
-	fmt.Fprintf(errWriter, err.Error())
 	os.Exit(1)
 }
 

@@ -1,0 +1,61 @@
+before:
+  hooks:
+    - go mod download
+builds:
+  - id: "tgscli"
+    ldflags: -X {{.Env.VERSION_IMPORT}}.GitCommit={{.Env.GIT_COMMIT}} -X {{.Env.VERSION_IMPORT}}.GitDescribe={{.Env.GIT_DESCRIBE}}
+    env:
+      - CGO_ENABLED=0
+    main: ./cmd/tgscli
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - 386
+      - arm
+    goarm:
+      - 6
+      - 7
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    # dir:
+    binary: tgscli
+archives:
+  - id: default
+    # name_template: "tgscli_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    builds:
+      - tgscli
+    format_overrides:
+      # - goos: windows
+      #   format: zip
+    replacements:
+      # darwin: Darwin
+      # linux: Linux
+      # windows: Windows
+nfpms:
+  - builds:
+      - tgscli
+    vendor: huangnauh
+    homepage: "https://github.com/huangnauh/tgscli"
+    maintainer: "huangnauh <huanglibo2010@gmail.com>"
+    # file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    description: "Storage Command Line utility for telegram files management"
+    formats:
+      # - apk
+      # - deb
+      - rpm
+    bindir: /usr/bin
+release:
+  disable: true
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ .Tag }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
