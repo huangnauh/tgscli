@@ -1,6 +1,6 @@
 # tgscli
 
-CLI for Telegram Files, written in Go.
+CLI for telegram files management, written in Go.
 
 ## Install
 Install from source:
