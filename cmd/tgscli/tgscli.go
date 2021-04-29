@@ -6,7 +6,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/huangnauh/tgscli/pkg/version"
+	"github.com/huangnauh/tgscli/version"
 	"github.com/spf13/cobra"
 )
 

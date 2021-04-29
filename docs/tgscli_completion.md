@@ -20,7 +20,7 @@ See each sub-command's help for details on how to use the generated script.
 ```
   -f, --force         force
       --save-pinned   save pinned meta
-  -v, --verbose       verbose
+      --verbose       verbose
 ```
 
 ### SEE ALSO

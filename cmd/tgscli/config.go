@@ -11,8 +11,8 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/tucnak/telebot.v2"
 
-	"github.com/huangnauh/tgscli/pkg/utils"
-	"github.com/huangnauh/tgscli/pkg/version"
+	"github.com/huangnauh/tgscli/utils"
+	"github.com/huangnauh/tgscli/version"
 )
 
 type Config struct {

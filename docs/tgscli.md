@@ -8,7 +8,7 @@ Storage Command Line utility for telegram files management
   -f, --force         force
   -h, --help          help for tgscli
       --save-pinned   save pinned meta
-  -v, --verbose       verbose
+      --verbose       verbose
 ```
 
 ### SEE ALSO

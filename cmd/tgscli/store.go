@@ -26,7 +26,7 @@ func init() {
 	rootCmd.AddCommand(getCmd)
 	rootCmd.AddCommand(shareCmd)
 	rootCmd.AddCommand(listCmd)
-	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "verbose")
+	rootCmd.PersistentFlags().BoolVar(&verboseFlag, "verbose", false, "verbose")
 	rootCmd.PersistentFlags().BoolVarP(&forceFlag, "force", "f", false, "force")
 	rootCmd.PersistentFlags().BoolVar(&savePinnedFlag, "save-pinned", false, "save pinned meta")
 }

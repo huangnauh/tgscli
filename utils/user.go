@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/huangnauh/tgscli/pkg/version"
+	"github.com/huangnauh/tgscli/version"
 )
 
 func GetStrEnv(name string) string {

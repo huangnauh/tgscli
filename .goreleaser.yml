@@ -15,10 +15,6 @@ builds:
       - amd64
       - arm64
       - 386
-      - arm
-    goarm:
-      - 6
-      - 7
     mod_timestamp: '{{ .CommitTimestamp }}'
     # dir:
     binary: tgscli

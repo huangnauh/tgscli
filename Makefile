@@ -1,6 +1,6 @@
 APP=tgscli
 REPO_PATH=github.com/huangnauh/${APP}
-VERSION_IMPORT=${REPO_PATH}/pkg/version
+VERSION_IMPORT=${REPO_PATH}/version
 GIT_COMMIT=$(shell git rev-parse --short HEAD)
 GIT_DESCRIBE=$(shell git describe --tags --always)
 GOLDFLAGS=-X $(VERSION_IMPORT).GitCommit=$(GIT_COMMIT) -X $(VERSION_IMPORT).GitDescribe=$(GIT_DESCRIBE)

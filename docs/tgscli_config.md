@@ -13,7 +13,7 @@ Handle configuration
 ```
   -f, --force         force
       --save-pinned   save pinned meta
-  -v, --verbose       verbose
+      --verbose       verbose
 ```
 
 ### SEE ALSO
