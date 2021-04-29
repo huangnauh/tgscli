@@ -5,5 +5,5 @@ const (
 )
 
 var (
-	GitDescribe = "0.0.2"
+	GitDescribe = "0.1.0"
 )
