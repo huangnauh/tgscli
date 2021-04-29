@@ -1,9 +1,9 @@
 ## tgscli list
 
-list prefix file
+list files containing relevant characters
 
 ```
-tgscli list [prefix] [flags]
+tgscli list [contains] [flags]
 ```
 
 ### Options

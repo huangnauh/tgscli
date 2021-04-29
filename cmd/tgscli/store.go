@@ -349,8 +349,8 @@ func newTable() *tablewriter.Table {
 }
 
 var listCmd = &cobra.Command{
-	Use:   "list [prefix]",
-	Short: "list prefix file",
+	Use:   "list [contains]",
+	Short: "list files containing relevant characters",
 	Args:  cobra.MaximumNArgs(1),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		prerun(cmd, args)
@@ -358,8 +358,14 @@ var listCmd = &cobra.Command{
 	PersistentPostRun: postrun,
 	Run: func(cmd *cobra.Command, args []string) {
 		table := newTable()
+		contains := ""
+		if len(args) == 1 {
+			contains = args[0]
+		}
 		for name, message := range messages {
-			formatTable(table, name, message)
+			if strings.Contains(name, contains) {
+				formatTable(table, name, message)
+			}
 		}
 		table.Render()
 	},

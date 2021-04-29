@@ -19,7 +19,7 @@ docs:
 install-app:
 	go install -ldflags '$(GOLDFLAGS)' ./cmd/${APP}
 
-install: install-app docs
+install: tidy install-app docs
 
 release-skip:
 	VERSION_IMPORT=${VERSION_IMPORT} GIT_COMMIT=${GIT_COMMIT} GIT_DESCRIBE=${GIT_DESCRIBE} \
