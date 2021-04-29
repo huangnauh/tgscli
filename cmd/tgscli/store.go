@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,7 +18,6 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
-	bolt "go.etcd.io/bbolt"
 	"gopkg.in/tucnak/telebot.v2"
 )
 
@@ -26,38 +26,82 @@ func init() {
 	rootCmd.AddCommand(getCmd)
 	rootCmd.AddCommand(shareCmd)
 	rootCmd.AddCommand(listCmd)
-	rootCmd.AddCommand(saveCmd)
+	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "verbose")
+	rootCmd.PersistentFlags().BoolVarP(&forceFlag, "force", "f", false, "force")
+	rootCmd.PersistentFlags().BoolVar(&savePinnedFlag, "save-pinned", false, "save pinned meta")
 }
 
 var (
-	db   *bolt.DB
-	bot  *telebot.Bot
-	chat *telebot.Chat
+	bot            *telebot.Bot
+	chat           *telebot.Chat
+	forceFlag      bool
+	verboseFlag    bool
+	savePinnedFlag bool
+	messages       map[string]Message
 )
 
-func postrun(cmd *cobra.Command, args []string) {
-	db.Close()
+type Message struct {
+	telebot.File
+	telebot.StoredMessage
+	Time time.Time `json:"time"`
 }
 
-func prerun(cmd *cobra.Command, args []string, remoteMetadata bool) {
+func (m *Message) GetEditable() telebot.Editable {
+	return m.StoredMessage
+}
+
+func (m *Message) Marshal() []byte {
+	body, err := json.Marshal(m)
+	if err != nil {
+		errorExitf("msg Info %+v: %v\n", m, err)
+	}
+	return body
+}
+
+func postrun(cmd *cobra.Command, args []string) {
+}
+
+func SaveMeta(metaPath string) {
+	file, err := os.OpenFile(metaPath, os.O_TRUNC|os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		errorExitf("Open meta File %s: %s\n", metaPath, err)
+	}
+	body, err := json.Marshal(messages)
+	if err != nil {
+		errorExitf("Marshal meta File %s: %s\n", metaPath, err)
+	}
+	_, err = file.Write(body)
+	if err != nil {
+		errorExitf("save meta File %s: %s\n", metaPath, err)
+	}
+}
+
+func GetMeta(metaPath string, metaInfo os.FileInfo) {
+	if verboseFlag {
+		fmt.Fprintf(outWriter, "local edited %s\n", metaInfo.ModTime())
+	}
+	metaFile, err := os.OpenFile(metaPath, os.O_RDONLY, 0644)
+	if err != nil {
+		errorExitf("Open meta File %s: %s\n", metaPath, err)
+	}
+	body, err := ioutil.ReadAll(metaFile)
+	if err != nil {
+		metaFile.Close()
+		errorExitf("Read meta File %s: %s\n", metaPath, err)
+	}
+	err = json.Unmarshal(body, &messages)
+	if err != nil {
+		metaFile.Close()
+		errorExitf("Unmarshal metadata %s: %s\n", metaPath, err)
+	}
+	metaFile.Close()
+}
+
+func prerun(cmd *cobra.Command, args []string) {
 	var err error
 	cfg, err = ReadConfig()
 	if err != nil {
 		errorExitf("Read Config: %v\n", err)
-	}
-
-	dbPath := GetDbPath()
-	_, err = os.Stat(dbPath)
-	if err != nil && os.IsNotExist(err) {
-		if remoteMetadata && cfg.DatabaseID != "" {
-			SaveFileByID(cfg.DatabaseID, dbPath, 0)
-		}
-	} else if err != nil {
-		errorExitf("Open Database: %s\n", err)
-	}
-	db, err = bolt.Open(dbPath, 0666, nil)
-	if err != nil {
-		errorExitf("Open Database: %v\n", err)
 	}
 
 	bot, err = telebot.NewBot(telebot.Settings{
@@ -73,59 +117,112 @@ func prerun(cmd *cobra.Command, args []string, remoteMetadata bool) {
 	if err != nil {
 		errorExitf("Get Telegram Chat: %v", err)
 	}
+
+	messages = make(map[string]Message)
+	metaPath := GetMetaPath()
+	metaInfo, err := os.Stat(metaPath)
+	if err != nil && os.IsNotExist(err) {
+	} else if err != nil {
+		errorExitf("Stat meta path: %s\n", err)
+	} else {
+		GetMeta(metaPath, metaInfo)
+	}
+
+	fmt.Fprintf(outWriter, "%d files in local\n", len(messages))
+	if chat.PinnedMessage == nil {
+		return
+	}
+
+	var editTime time.Time
+	caption := chat.PinnedMessage.Document.Caption
+	if strings.HasPrefix(caption, "meta-") && strings.HasSuffix(caption, ".json") {
+		timestamp, _ := strconv.Atoi(caption[len("meta-") : len(caption)-len(".json")])
+		if timestamp > 0 {
+			editTime = time.Unix(int64(timestamp), 0)
+		}
+	} else {
+		editTime = chat.PinnedMessage.LastEdited()
+	}
+
+	if verboseFlag {
+		fmt.Fprintf(outWriter, "  pin edited %s\n", editTime)
+	}
+	if !forceFlag {
+		if metaInfo != nil && !editTime.After(metaInfo.ModTime()) {
+			return
+		}
+	}
+
+	getPinnedMessages()
+	if messageId, _ := chat.PinnedMessage.MessageSig(); messageId != cfg.MessageID {
+		cfg.Write()
+	}
+	SaveMeta(metaPath)
+}
+
+func getPinnedMessages() {
+	buf := &bytes.Buffer{}
+	err := GetFileByID(chat.PinnedMessage.Document.File.FileID,
+		int64(chat.PinnedMessage.Document.File.FileSize), buf)
+	if err != nil {
+		errorExitf("pinned file: %s\n", err)
+	}
+	if savePinnedFlag {
+		SaveMeta(GetMetaPinnedPath())
+	}
+	pinnedMessages := make(map[string]Message)
+	err = json.Unmarshal(buf.Bytes(), &pinnedMessages)
+	if err != nil {
+		errorExitf("pinned file: %s\n", err)
+	}
+	fmt.Fprintf(outWriter, "%d files in pinned\n", len(pinnedMessages))
+	for name, pinnedMessage := range pinnedMessages {
+		message, ok := messages[name]
+		if !ok || message.FileID == pinnedMessage.FileID {
+			messages[name] = pinnedMessage
+		} else {
+			fmt.Fprintf(outWriter, "message %s conflict with pinned, try new name\n", name)
+			newName := getName(name, messages, pinnedMessages)
+			messages[newName] = pinnedMessage
+		}
+	}
+	fmt.Fprintf(outWriter, "got %d files in total\n", len(messages))
 }
 
 func GetUrlByName(filename string) (string, error) {
-	var v []byte
-	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(strconv.FormatInt(cfg.ChatID, 10)))
-		if b == nil {
-			return nil
-		}
-		v = b.Get([]byte(filename))
-		return nil
-	})
-	if v == nil {
+	msg, ok := messages[filename]
+	if !ok {
 		return "", os.ErrNotExist
 	}
-	file := NewFile(v)
-	uri, err := bot.FileURLByID(file.FileID)
+	uri, err := bot.FileURLByID(msg.FileID)
 	if err != nil {
 		if strings.Contains(err.Error(), "Not Found") {
 			return "", os.ErrNotExist
 		}
-		return "", fmt.Errorf("Get File Uri %s: %v\n", file.FileID, err)
+		return "", fmt.Errorf("Get File Uri %s: %v\n", filename, err)
 	}
 	return uri, err
 }
 
-func SaveFileByName(filename, output string) {
-	var v []byte
-	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(strconv.FormatInt(cfg.ChatID, 10)))
-		if b == nil {
-			return nil
-		}
-		v = b.Get([]byte(filename))
-		return nil
-	})
-	if v == nil {
-		fmt.Fprintf(outWriter, "Empty\n")
-		return
+func SaveFileByName(filename, output string) error {
+	msg, ok := messages[filename]
+	if !ok {
+		return os.ErrNotExist
 	}
-	file := NewFile(v)
-	err := SaveFileByID(file.FileID, output, int64(file.FileSize))
+	rawFile, err := os.OpenFile(output, os.O_TRUNC|os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Fprintf(outWriter, "Not Found\n")
-		} else {
-			errorExit(err)
-		}
+		return fmt.Errorf("Download File %s: %s\n", filename, err)
 	}
-	fmt.Fprintf(outWriter, "Download File to %s\n", output)
+	defer rawFile.Close()
+
+	err = GetFileByID(msg.FileID, int64(msg.FileSize), rawFile)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func SaveFileByID(fileID, output string, size int64) error {
+func GetFileByID(fileID string, size int64, writer io.Writer) error {
 	uri, err := bot.FileURLByID(fileID)
 	if err != nil {
 		if strings.Contains(err.Error(), "Not Found") {
@@ -151,11 +248,6 @@ func SaveFileByID(fileID, output string, size int64) error {
 	if res.StatusCode >= http.StatusBadRequest {
 		return fmt.Errorf("Get File Response %s: %d\n", fileID, res.StatusCode)
 	}
-	rawFile, err := os.OpenFile(output, os.O_TRUNC|os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		return fmt.Errorf("Download File %s: %s\n", fileID, err)
-	}
-	defer rawFile.Close()
 
 	var src io.Reader
 	if size > 0 {
@@ -167,7 +259,7 @@ func SaveFileByID(fileID, output string, size int64) error {
 		src = res.Body
 	}
 
-	_, err = io.Copy(rawFile, src)
+	_, err = io.Copy(writer, src)
 	if err != nil {
 		return fmt.Errorf("Download File %s: %s\n", fileID, err)
 	}
@@ -200,55 +292,12 @@ func UploadFileByName(filename string) *telebot.Message {
 	return m
 }
 
-type File struct {
-	telebot.File
-	Time time.Time `json:"time"`
-}
-
-func NewFile(v []byte) *File {
-	file := &File{}
-	err := json.Unmarshal(v, file)
-	if err != nil {
-		errorExitf("File Info %s: %v\n", v, err)
-	}
-	return file
-}
-
-var saveCmd = &cobra.Command{
-	Use:   "save",
-	Short: "upload metadata",
-	Args:  cobra.NoArgs,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		prerun(cmd, args, false)
-	},
-	PersistentPostRun: postrun,
-	Run: func(cmd *cobra.Command, args []string) {
-		dbPath := GetDbPath()
-		_, err := os.Stat(dbPath)
-		if err != nil && os.IsNotExist(err) {
-			fmt.Fprintf(outWriter, "Not Found\n")
-			return
-		}
-		db, err = bolt.Open(dbPath, 0666, nil)
-		if err != nil {
-			errorExitf("Open Database: %v\n", err)
-		}
-		m := UploadFileByName(dbPath)
-		cfg.DatabaseID = m.Document.File.FileID
-		err = cfg.Write()
-		if err != nil {
-			errorExitf("Upload metadata: %v\n", err)
-		}
-		fmt.Fprintf(outWriter, "Upload metadata to :%s\n", cfg.DatabaseID)
-	},
-}
-
 var getCmd = &cobra.Command{
 	Use:   "get [file] [output]",
 	Short: "get file",
 	Args:  cobra.RangeArgs(1, 2),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		prerun(cmd, args, true)
+		prerun(cmd, args)
 	},
 	PersistentPostRun: postrun,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -256,7 +305,11 @@ var getCmd = &cobra.Command{
 		if len(args) == 2 {
 			outputFile = args[1]
 		}
-		SaveFileByName(args[0], outputFile)
+		err := SaveFileByName(args[0], outputFile)
+		if err != nil {
+			errorExitf("Download: %v\n", err)
+		}
+		fmt.Fprintf(outWriter, "Download File to %s\n", outputFile)
 	},
 }
 
@@ -265,7 +318,7 @@ var shareCmd = &cobra.Command{
 	Short: "generate url for download access",
 	Args:  cobra.ExactArgs(1),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		prerun(cmd, args, true)
+		prerun(cmd, args)
 	},
 	PersistentPostRun: postrun,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -277,12 +330,11 @@ var shareCmd = &cobra.Command{
 	},
 }
 
-func formatTable(table *tablewriter.Table, k, v []byte) {
-	file := NewFile(v)
+func formatTable(table *tablewriter.Table, name string, msg Message) {
 	table.Append([]string{
-		file.Time.Format(time.RFC1123),
-		humanize.Bytes(uint64(file.FileSize)),
-		string(k),
+		msg.Time.Format(time.RFC1123),
+		humanize.Bytes(uint64(msg.FileSize)),
+		name,
 	})
 }
 
@@ -302,37 +354,51 @@ var listCmd = &cobra.Command{
 	Short: "list prefix file",
 	Args:  cobra.MaximumNArgs(1),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		prerun(cmd, args, true)
+		prerun(cmd, args)
 	},
 	PersistentPostRun: postrun,
 	Run: func(cmd *cobra.Command, args []string) {
-		db.View(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(strconv.FormatInt(cfg.ChatID, 10)))
-			if b == nil {
-				fmt.Fprintf(outWriter, "Empty\n")
-				return nil
-			}
-			c := b.Cursor()
-			table := newTable()
-			found := false
-			if len(args) > 0 {
-				prefix := []byte(args[0])
-				for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-					found = true
-					formatTable(table, k, v)
-				}
-			} else {
-				for k, v := c.First(); k != nil; k, v = c.Next() {
-					found = true
-					formatTable(table, k, v)
-				}
-			}
-			if found {
-				table.Render()
-			}
-			return nil
-		})
+		table := newTable()
+		for name, message := range messages {
+			formatTable(table, name, message)
+		}
+		table.Render()
 	},
+}
+
+func getName(filename string, messages ...map[string]Message) string {
+	name := filepath.Base(filename)
+	for count := 1; ; count++ {
+		found := false
+		for _, msgMap := range messages {
+			_, ok := msgMap[name]
+			if ok {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return name
+		}
+		name = fmt.Sprintf("%s#%d", name, count)
+	}
+}
+
+func setName(messages map[string]Message, filename string, msg Message) error {
+	name := getName(filename, messages)
+	body, err := json.Marshal(messages)
+	if err != nil {
+		return err
+	}
+	metaPath := GetMetaPath()
+	metaFile, err := os.OpenFile(metaPath, os.O_TRUNC|os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	defer metaFile.Close()
+	_, err = metaFile.Write(body)
+	messages[name] = msg
+	return err
 }
 
 var putCmd = &cobra.Command{
@@ -340,7 +406,7 @@ var putCmd = &cobra.Command{
 	Short: "put file",
 	Args:  cobra.ExactArgs(1),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		prerun(cmd, args, true)
+		prerun(cmd, args)
 	},
 	PersistentPostRun: postrun,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -348,24 +414,60 @@ var putCmd = &cobra.Command{
 		startTime := time.Now()
 		m := UploadFileByName(args[0])
 		fmt.Fprintf(outWriter, "Upload time:%s\n", time.Since(startTime))
-		body, _ := json.Marshal(File{
+		messageID, chatID := m.MessageSig()
+		msg := Message{
 			m.Document.File,
+			telebot.StoredMessage{
+				MessageID: messageID,
+				ChatID:    chatID,
+			},
 			time.Now(),
-		})
-
-		err = db.Update(func(tx *bolt.Tx) error {
-			b, err := tx.CreateBucketIfNotExists([]byte(strconv.FormatInt(cfg.ChatID, 10)))
-			if err != nil {
-				errorExitf("Put Cache: %v\n", err)
-			}
-			err = b.Put([]byte(filepath.Base(args[0])), body)
-			if err != nil {
-				errorExitf("Put Cache: %v\n", err)
-			}
-			return nil
-		})
-		if err != nil {
-			errorExitf("Put Cache DB: %v\n", err)
 		}
+		err = setName(messages, args[0], msg)
+		if err != nil {
+			errorExitf("set name to message: %v\n", err)
+		}
+
+		body, err := json.Marshal(messages)
+		if err != nil {
+			errorExitf("marshal messages: %v\n", err)
+		}
+		doc := &telebot.Document{
+			File:     telebot.FromReader(bytes.NewReader(body)),
+			Caption:  fmt.Sprintf("meta-%d.json", time.Now().Unix()),
+			FileName: "meta.json",
+		}
+		if cfg.MessageID == "" {
+			m, err := bot.Send(chat, doc)
+			if err != nil {
+				errorExitf("Upload failed: %v\n", err)
+			}
+			cfg.MessageID, _ = m.MessageSig()
+			err = bot.Pin(cfg.StoredMessage)
+			if err != nil {
+				errorExitf("pin error: %v\n", err)
+			}
+			err = cfg.Write()
+			if err != nil {
+				errorExitf("write config: %v\n", err)
+			}
+		} else {
+			m, err = bot.Edit(cfg.StoredMessage, doc)
+			if err != nil {
+				errorExitf("Upload failed: %v\n", err)
+			}
+			messageID, _ := m.MessageSig()
+			if err != nil {
+				errorExitf("write config: %v\n", err)
+			}
+			if messageID != cfg.MessageID {
+				cfg.MessageID = messageID
+				err = cfg.Write()
+				if err != nil {
+					errorExitf("write config: %v\n", err)
+				}
+			}
+		}
+		SaveMeta(GetMetaPath())
 	},
 }

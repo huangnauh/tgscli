@@ -1,22 +1,23 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/tucnak/telebot.v2"
 
 	"github.com/huangnauh/tgscli/pkg/utils"
 	"github.com/huangnauh/tgscli/pkg/version"
 )
 
 type Config struct {
-	BotToken   string
-	ChatID     int64
-	DatabaseID string
+	BotToken string
+	telebot.StoredMessage
 }
 
 var cfg Config
@@ -51,12 +52,17 @@ func getDefaultCacheDir() string {
 
 func getDefaultConfigPath() string {
 	configDir := getDefaultConfigDir()
-	return filepath.Join(configDir, "config.yaml")
+	return filepath.Join(configDir, "config.json")
 }
 
-func GetDbPath() string {
+func GetMetaPath() string {
 	userDir := getDefaultCacheDir()
-	return filepath.Join(userDir, "data.db")
+	return filepath.Join(userDir, "meta.json")
+}
+
+func GetMetaPinnedPath() string {
+	userDir := getDefaultCacheDir()
+	return filepath.Join(userDir, "meta_pinned.json")
 }
 
 func ReadConfig() (c Config, err error) {
@@ -67,8 +73,12 @@ func ReadConfig() (c Config, err error) {
 		}
 		return Config{}, err
 	}
-	decoder := yaml.NewDecoder(file)
-	err = decoder.Decode(&c)
+	body, err := ioutil.ReadAll(file)
+	if err != nil {
+		return Config{}, err
+	}
+
+	err = json.Unmarshal(body, &c)
 	if err != nil {
 		return Config{}, err
 	}
@@ -76,15 +86,19 @@ func ReadConfig() (c Config, err error) {
 }
 
 func (c *Config) Write() error {
+	fmt.Fprintln(outWriter, "Config write.")
 	configPath := getDefaultConfigPath()
 
 	file, err := os.OpenFile(configPath, os.O_TRUNC|os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		panic(err)
+		return err
 	}
-
-	encoder := yaml.NewEncoder(file)
-	return encoder.Encode(&c)
+	body, err := json.MarshalIndent(c, "", "\t")
+	if err != nil {
+		return err
+	}
+	_, err = file.Write(body)
+	return err
 }
 
 var configAddClusterCmd = &cobra.Command{
